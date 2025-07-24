@@ -1,0 +1,102 @@
+# GitHub Actions Workflow for CI/CD of Product Catalog Service
+
+name: product-catalog-ci
+
+# Trigger the workflow on pull requests targeting the 'main' branch
+on: 
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest  # Use Ubuntu machine for this job
+
+    steps:
+      - name: checkout code
+        uses: actions/checkout@v4  # Pull the latest code from the pull request
+
+      - name: Setup Go 1.22
+        uses: actions/setup-go@v2  # Install Go runtime
+        with:
+          go-version: 1.22         # Specify Go version
+
+      - name: Build
+        run: |
+          cd src/product-catalog            # Navigate to the microservice directory
+          go mod download                   # Download Go dependencies
+          go build -o product-catalog-service main.go  # Build the Go application
+
+      - name: unit tests
+        run: |
+          cd src/product-catalog            # Navigate again (if needed)
+          go test ./...                     # Run all unit tests recursively
+
+  code-quality:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout code
+        uses: actions/checkout@v4  # Pull the latest code
+
+      - name: Setup Go 1.22
+        uses: actions/setup-go@v2  # Install Go runtime
+        with:
+          go-version: 1.22
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6  # Use official linting GitHub Action
+        with:
+          version: v1.55.2                       # Use specific linter version
+          run: golangci-lint run                 # Lint command
+          working-directory: src/product-catalog # Directory where code exists
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: build  # This job depends on successful completion of the build job
+
+    steps:
+      - name: checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Docker
+        uses: docker/setup-buildx-action@v1  # Sets up Docker BuildKit (advanced build support)
+
+      - name: Login to Docker
+        uses: docker/login-action@v3         # Logs into Docker Hub
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}  # Use GitHub secret for username
+          password: ${{ secrets.DOCKER_TOKEN }}     # Use GitHub secret for password or token
+
+      - name: Docker Push
+        uses: docker/build-push-action@v6    # Build and push the Docker image
+        with:
+          context: src/product-catalog       # Set build context (where Dockerfile is)
+          file: src/product-catalog/Dockerfile  # Path to Dockerfile
+          push: true                         # Actually push image to Docker Hub
+          tags: ${{ secrets.DOCKER_USERNAME }}/product-catalog:${{github.run_id}}  
+          # Tag image uniquely using the GitHub run ID
+
+  updatek8s:
+    runs-on: ubuntu-latest
+    needs: docker  # This job runs only if the docker job completes successfully
+
+    steps:
+      - name: checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}  # Use built-in GitHub token to allow pushing code
+
+      - name: Update tag in kubernetes deployment manifest
+        run: | 
+          # Use sed to replace the image line in the Kubernetes YAML with the new tag
+          sed -i "s|image: .*|image: ${{ secrets.DOCKER_USERNAME }}/product-catalog:${{github.run_id}}|" kubernetes/productcatalog/deploy.yaml
+
+      - name: Commit and push changes
+        run: |
+          git config --global user.email "shubhbansal44@gmail.com"      # Set git author email
+          git config --global user.name "Shubh Bansal"      # Set git author name
+          git add kubernetes/productcatalog/deploy.yaml            # Stage the updated file
+          git commit -m "[CI]: Update product catalog image tag"   # Commit with a CI message
+          git push origin HEAD:main -f                             # Force push to main branch
+          # Note: force push is risky; only use if absolutely necessary
