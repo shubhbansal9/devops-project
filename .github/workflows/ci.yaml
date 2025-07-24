@@ -49,6 +49,7 @@ jobs:
         with:
           version: v1.55.2                       # Lint command
           working-directory: src/product-catalog 
+          args: --timeout=3m
 
   docker:
     runs-on: ubuntu-latest
