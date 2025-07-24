@@ -47,8 +47,7 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6  # Use official linting GitHub Action
         with:
-          version: v1.55.2                       # Use specific linter version
-          run: golangci-lint run                 # Lint command
+          version: v1.55.2                       # Lint command
           working-directory: src/product-catalog 
           args: run
 
